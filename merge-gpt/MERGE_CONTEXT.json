@@ -1,0 +1,715 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/merge_context.v1.schema.json",
+  "title": "MERGE_CONTEXT",
+  "description": "Persistent state for a MERGE_GPT engagement. Designed for resumable multi-phase synthesis and assembly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "engagement",
+    "switches",
+    "intent",
+    "sources",
+    "output",
+    "phases",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "merge_context.v1"
+    },
+
+    "engagement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "created_at", "last_updated_at", "protocol", "actor"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable engagement identifier (ULID/UUID recommended).",
+          "minLength": 8
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "last_updated_at": { "type": "string", "format": "date-time" },
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "edition"],
+          "properties": {
+            "name": { "type": "string", "const": "MERGE_GPT_PROTOCOL" },
+            "version": { "type": "string", "pattern": "^v\\d+\\.\\d+(\\.\\d+)?$" },
+            "edition": { "type": "string", "enum": ["chatgpt"] }
+          }
+        },
+        "actor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "label"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["human", "agent"] },
+            "label": { "type": "string", "minLength": 1 }
+          }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "current_phase", "progress"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "ANALYZING",
+            "PLANNING",
+            "EXECUTING",
+            "ASSEMBLING",
+            "VERIFYING",
+            "DELIVERED",
+            "ACCEPTED",
+            "ABORTED"
+          ]
+        },
+        "current_phase": {
+          "description": "Phase identifier: 0, 1..N, A, V, F",
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "enum": ["A", "V", "F"] }
+          ]
+        },
+        "progress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phases_total", "phases_completed"],
+          "properties": {
+            "phases_total": { "type": "integer", "minimum": 1 },
+            "phases_completed": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "checkpoint_due": {
+          "type": "boolean",
+          "description": "True if mode requires user approval before continuing."
+        },
+        "last_checkpoint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase_id", "at", "action"],
+          "properties": {
+            "phase_id": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "enum": ["A", "V", "F"] }
+              ]
+            },
+            "at": { "type": "string", "format": "date-time" },
+            "action": { "type": "string", "enum": ["APPROVED", "PAUSED", "MODIFIED", "ABORTED"] },
+            "comment": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "switches": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "estimate", "conflict", "style", "toc", "glossary", "parts", "verify"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["auto", "gated", "step"] },
+        "estimate": { "type": "boolean" },
+        "conflict": { "type": "string", "enum": ["primary_wins", "synthesize", "parallel", "flag"] },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profile"],
+          "properties": {
+            "profile": { "type": "string", "enum": ["legal", "technical", "corporate", "template"] },
+            "template_ref": {
+              "type": "string",
+              "description": "Filename or stable reference to a template document if profile=template"
+            }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "profile": { "const": "template" } }, "required": ["profile"] },
+              "then": { "required": ["template_ref"] }
+            }
+          ]
+        },
+        "toc": { "type": "boolean" },
+        "glossary": { "type": "boolean" },
+        "parts": { "type": "string", "enum": ["single", "split"] },
+        "max_phases": {
+          "description": "Optional cap for the number of phases.",
+          "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
+        },
+        "verify": { "type": "boolean" }
+      }
+    },
+
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 5 },
+        "audience": { "type": "string" },
+        "tone": { "type": "string" },
+        "editorial_rules": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "primary_source_id": {
+          "type": "string",
+          "description": "Required when switches.conflict=primary_wins."
+        },
+        "output_name": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "primary_source_id": { "type": "string" }
+            }
+          },
+          "then": {}
+        }
+      ]
+    },
+
+    "context_extensions": {
+      "type": "array",
+      "description": "Mid-stream behavioral constraints recorded as durable state.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "content", "applies_from_phase"],
+        "properties": {
+          "id": { "type": "string", "minLength": 3 },
+          "type": {
+            "type": "string",
+            "enum": ["vocabulary", "ordering", "exclusion", "addition", "tone", "numbering", "xref_style", "entity_mapping", "other"]
+          },
+          "content": { "type": "string", "minLength": 1 },
+          "applies_from_phase": {
+            "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+          }
+        }
+      }
+    },
+
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "totals"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/source" }
+        },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["documents", "pages_est", "paragraphs_est", "tables_est"],
+          "properties": {
+            "documents": { "type": "integer", "minimum": 1 },
+            "pages_est": { "type": "integer", "minimum": 0 },
+            "paragraphs_est": { "type": "integer", "minimum": 0 },
+            "tables_est": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "content_map": {
+      "type": "object",
+      "description": "Per-source extracted structure and sections.",
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/source_structure" }
+        }
+      }
+    },
+
+    "overlap_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "matrix": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/overlap_row" }
+        },
+        "classification_key": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "identical": { "type": "string" },
+            "complementary": { "type": "string" },
+            "conflicting": { "type": "string" },
+            "unique": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "conflicts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "totals"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/conflict" }
+        },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count"],
+          "properties": {
+            "count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["structure", "deliverables"],
+      "properties": {
+        "structure": { "$ref": "#/$defs/output_structure" },
+        "deliverables": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deliverable" }
+        }
+      }
+    },
+
+    "phases": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "checkpoints"],
+      "properties": {
+        "plan": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/phase" }
+        },
+        "checkpoints": {
+          "type": "array",
+          "description": "Phase IDs at which gated mode must pause.",
+          "items": {
+            "oneOf": [
+              { "type": "integer", "minimum": 0 },
+              { "type": "string", "enum": ["A", "V", "F"] }
+            ]
+          }
+        }
+      }
+    },
+
+    "budget_estimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "range_tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["low", "high"],
+          "properties": {
+            "low": { "type": "integer", "minimum": 0 },
+            "high": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "confidence": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+        "assumptions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "by_phase": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["phase_id", "tokens_est"],
+            "properties": {
+              "phase_id": {
+                "oneOf": [
+                  { "type": "integer", "minimum": 0 },
+                  { "type": "string", "enum": ["A", "V", "F"] }
+                ]
+              },
+              "tokens_est": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+
+    "entities_registry": {
+      "type": "object",
+      "description": "Optional registry for defined terms/entities discovered during merging.",
+      "additionalProperties": false,
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/entity_category" }
+        }
+      }
+    },
+
+    "amendments": {
+      "type": "array",
+      "description": "Durable record of mid-process changes and their impact.",
+      "items": { "$ref": "#/$defs/amendment" }
+    },
+
+    "history": {
+      "type": "array",
+      "description": "Optional audit trail of merge actions.",
+      "items": { "$ref": "#/$defs/history_event" }
+    }
+  },
+
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "filename", "type", "metrics"],
+      "properties": {
+        "id": { "type": "string", "minLength": 3 },
+        "filename": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["docx", "pdf", "md", "txt", "html", "other"] },
+        "sha256": {
+          "type": "string",
+          "description": "Optional content hash for stable identity.",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["primary", "secondary", "reference"],
+          "default": "secondary"
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pages_est", "paragraphs_est", "tables_est", "headings_est"],
+          "properties": {
+            "pages_est": { "type": "integer", "minimum": 0 },
+            "paragraphs_est": { "type": "integer", "minimum": 0 },
+            "tables_est": { "type": "integer", "minimum": 0 },
+            "headings_est": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "key_topics": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "ingest_notes": { "type": "string" }
+      }
+    },
+
+    "source_structure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "skeleton"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "skeleton": {
+          "type": "array",
+          "description": "Hierarchical section nodes extracted from the source.",
+          "items": { "$ref": "#/$defs/section_node" }
+        }
+      }
+    },
+
+    "section_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "level"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable identifier like 'S1:1.2.3' or 'DocA:§4.1'."
+        },
+        "title": { "type": "string" },
+        "level": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "path": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/section_node" }
+        }
+      }
+    },
+
+    "overlap_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topic", "classification", "mentions"],
+      "properties": {
+        "topic": { "type": "string" },
+        "classification": { "type": "string", "enum": ["Identical", "Complementary", "Conflicting", "Unique"] },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "section_ref"],
+            "properties": {
+              "source_id": { "type": "string" },
+              "section_ref": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "conflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "topic", "claims", "strategy", "assigned_phase"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^C\\d+$" },
+        "topic": { "type": "string" },
+        "claims": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "section_ref", "claim"],
+            "properties": {
+              "source_id": { "type": "string" },
+              "section_ref": { "type": "string" },
+              "claim": { "type": "string" }
+            }
+          }
+        },
+        "strategy": { "type": "string", "enum": ["primary_wins", "synthesize", "parallel", "flag"] },
+        "resolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resolved": { "type": "boolean" },
+            "chosen_source_id": { "type": "string" },
+            "rationale": { "type": "string" },
+            "output_ref": { "type": "string" }
+          }
+        },
+        "assigned_phase": {
+          "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+        },
+        "severity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"], "default": "MEDIUM" }
+      }
+    },
+
+    "output_structure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "nodes"],
+      "properties": {
+        "title": { "type": "string" },
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/output_node" }
+        }
+      }
+    },
+
+    "output_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["title_page", "toc", "part", "section", "subsection", "appendix", "glossary", "conclusion"]
+        },
+        "title": { "type": "string" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/output_node" }
+        }
+      }
+    },
+
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "kind", "scope", "targets", "estimates", "status"],
+      "properties": {
+        "id": {
+          "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+        },
+        "label": { "type": "string" },
+        "kind": { "type": "string", "enum": ["analysis", "content", "assembly", "verification", "delivery"] },
+        "scope": {
+          "type": "array",
+          "description": "Source sections included in this phase.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "section_refs"],
+            "properties": {
+              "source_id": { "type": "string" },
+              "section_refs": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "targets": {
+          "type": "array",
+          "description": "Output nodes produced/filled by this phase.",
+          "items": { "type": "string" }
+        },
+        "estimates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["paragraphs_est", "tables_est"],
+          "properties": {
+            "paragraphs_est": { "type": "integer", "minimum": 0 },
+            "tables_est": { "type": "integer", "minimum": 0 },
+            "tokens_est": { "type": "integer", "minimum": 0 },
+            "complexity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+            "conflicts_in_scope": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": {
+            "state": { "type": "string", "enum": ["PENDING", "IN_PROGRESS", "COMPLETE", "BLOCKED", "SKIPPED"] },
+            "started_at": { "type": "string", "format": "date-time" },
+            "completed_at": { "type": "string", "format": "date-time" },
+            "notes": { "type": "string" }
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deliverable" }
+        }
+      }
+    },
+
+    "deliverable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["docx", "md", "pdf", "json", "txt", "other"] },
+        "title": { "type": "string" },
+        "path_or_ref": {
+          "type": "string",
+          "description": "A path, URL, or stable reference in the hosting system."
+        },
+        "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+        "produced_by_phase": {
+          "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+        }
+      }
+    },
+
+    "entity_category": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "count"],
+      "properties": {
+        "name": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 },
+        "id_range": { "type": "string" },
+        "defined_in_phases": {
+          "type": "array",
+          "items": {
+            "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+          }
+        }
+      }
+    },
+
+    "amendment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "at", "description", "impact"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^AMD-\\d+$" },
+        "at": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" },
+        "requested_by": { "type": "string" },
+        "impact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phases_affected", "reexecution_required"],
+          "properties": {
+            "phases_affected": {
+              "type": "array",
+              "items": {
+                "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+              }
+            },
+            "reexecution_required": { "type": "boolean" },
+            "notes": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "history_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "event", "phase_id"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "event": {
+          "type": "string",
+          "enum": [
+            "PHASE_STARTED",
+            "PHASE_COMPLETED",
+            "CHECKPOINT_REACHED",
+            "CHECKPOINT_APPROVED",
+            "CHECKPOINT_MODIFIED",
+            "CONFLICT_RECORDED",
+            "CONFLICT_RESOLVED",
+            "DELIVERABLE_EMITTED",
+            "ACCEPTED",
+            "ABORTED"
+          ]
+        },
+        "phase_id": {
+          "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "enum": ["A", "V", "F"] }]
+        },
+        "detail": { "type": "string" }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "switches": {
+            "properties": { "conflict": { "const": "primary_wins" } },
+            "required": ["conflict"]
+          }
+        },
+        "required": ["switches"]
+      },
+      "then": {
+        "properties": {
+          "intent": { "required": ["primary_source_id"] }
+        }
+      }
+    }
+  ]
+}
